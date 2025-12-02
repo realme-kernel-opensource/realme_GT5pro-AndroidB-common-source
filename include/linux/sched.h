@@ -72,6 +72,7 @@ struct signal_struct;
 struct task_delay_info;
 struct task_group;
 
+
 /*
  * Task state bitmask. NOTE! These bits are also
  * encoded in fs/proc/array.c: get_task_state().
@@ -1548,6 +1549,7 @@ struct task_struct {
 #endif
 	ANDROID_KABI_USE(1, unsigned int saved_state);
 	ANDROID_KABI_RESERVE(2);
+
 	ANDROID_KABI_RESERVE(3);
 	ANDROID_KABI_RESERVE(4);
 	ANDROID_KABI_RESERVE(5);
@@ -1925,6 +1927,7 @@ static inline int task_nice(const struct task_struct *p)
 {
 	return PRIO_TO_NICE((p)->static_prio);
 }
+
 
 extern int can_nice(const struct task_struct *p, const int nice);
 extern int task_curr(const struct task_struct *p);

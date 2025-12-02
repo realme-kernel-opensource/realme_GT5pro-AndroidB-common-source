@@ -95,9 +95,16 @@
 #include "../../io_uring/io-wq.h"
 #include "../smpboot.h"
 
+
 #include <trace/hooks/sched.h>
 #include <trace/hooks/dtask.h>
 #include <trace/hooks/cgroup.h>
+
+#if IS_ENABLED(CONFIG_OPLUS_SCHED_TUNE)
+#include <../kernel/oplus_cpu/sched/sched_tune/tune.h>
+#endif
+
+#include "../locking/locking_main.h"
 
 /*
  * Export tracepoints that act as a bare tracehook (ie: have no trace event
@@ -126,6 +133,7 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(sched_stat_blocked);
 
 DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
 EXPORT_SYMBOL_GPL(runqueues);
+
 
 #ifdef CONFIG_SCHED_DEBUG
 /*
@@ -178,7 +186,8 @@ static inline int __task_prio(struct task_struct *p)
 	if (p->sched_class == &idle_sched_class)
 		return MAX_RT_PRIO + NICE_WIDTH; /* 140 */
 
-	return MAX_RT_PRIO + MAX_NICE; /* 120, squash fair */
+
+	return MAX_RT_PRIO + MAX_NICE; /* 119, squash fair */
 }
 
 /*
@@ -205,6 +214,8 @@ static inline bool prio_less(struct task_struct *a, struct task_struct *b, bool 
 
 	if (pa == MAX_RT_PRIO + MAX_NICE)	/* fair */
 		return cfs_prio_less(a, b, in_fi);
+
+
 
 	return false;
 }
@@ -1231,6 +1242,7 @@ bool sched_can_stop_tick(struct rq *rq)
 	fifo_nr_running = rq->rt.rt_nr_running - rq->rt.rr_nr_running;
 	if (fifo_nr_running)
 		return true;
+
 
 	/*
 	 * If there are no DL,RR/FIFO tasks, there must only be CFS tasks left;
@@ -4796,7 +4808,6 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 		 */
 		p->sched_reset_on_fork = 0;
 	}
-
 	if (dl_prio(p->prio))
 		return -EAGAIN;
 	else if (rt_prio(p->prio))
@@ -4821,6 +4832,7 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 	RB_CLEAR_NODE(&p->pushable_dl_tasks);
 #endif
 	return 0;
+
 }
 
 void sched_cgroup_fork(struct task_struct *p, struct kernel_clone_args *kargs)
@@ -5712,10 +5724,9 @@ void scheduler_tick(void)
 	perf_event_task_tick();
 
 #ifdef CONFIG_SMP
-	rq->idle_balance = idle_cpu(cpu);
-	trigger_load_balance(rq);
+		rq->idle_balance = idle_cpu(cpu);
+		trigger_load_balance(rq);
 #endif
-
 	trace_android_vh_scheduler_tick(rq);
 }
 
@@ -6026,6 +6037,7 @@ static void put_prev_task_balance(struct rq *rq, struct task_struct *prev,
 	 * a runnable task of @class priority or higher.
 	 */
 	for_class_range(class, prev->sched_class, &idle_sched_class) {
+
 		if (class->balance(rq, prev, rf))
 			break;
 	}
@@ -6042,7 +6054,6 @@ __pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 {
 	const struct sched_class *class;
 	struct task_struct *p;
-
 	/*
 	 * Optimization: we know that if all tasks are in the fair class we can
 	 * call that function directly, but only if the @prev task wasn't of a
@@ -6100,7 +6111,6 @@ static inline struct task_struct *pick_task(struct rq *rq)
 {
 	const struct sched_class *class;
 	struct task_struct *p;
-
 	for_each_class(class) {
 		p = class->pick_task(rq);
 		if (p)
@@ -6714,6 +6724,7 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 #endif
 
 	trace_android_rvh_schedule(sched_mode, prev, next, rq);
+	locking_record_switch_in_cs(prev);
 	if (likely(prev != next)) {
 		rq->nr_switches++;
 		/*
@@ -7074,6 +7085,7 @@ EXPORT_SYMBOL(default_wake_function);
 
 static void __setscheduler_prio(struct task_struct *p, int prio)
 {
+
 	if (dl_prio(prio))
 		p->sched_class = &dl_sched_class;
 	else if (rt_prio(prio))
@@ -7890,7 +7902,6 @@ change:
 	preempt_disable();
 	head = splice_balance_callbacks(rq);
 	task_rq_unlock(rq, p, &rf);
-
 	if (pi) {
 		if (cpuset_locked)
 			cpuset_unlock();
@@ -10512,6 +10523,11 @@ void sched_move_task(struct task_struct *tsk)
 	struct rq_flags rf;
 	struct rq *rq;
 
+#if IS_ENABLED(CONFIG_OPLUS_SCHED_TUNE)
+	schedtune_attach(tsk);
+#endif
+
+
 	rq = task_rq_lock(tsk, &rf);
 	update_rq_clock(rq);
 
@@ -10552,6 +10568,9 @@ cpu_cgroup_css_alloc(struct cgroup_subsys_state *parent_css)
 	struct task_group *tg;
 
 	if (!parent) {
+#if IS_ENABLED(CONFIG_OPLUS_SCHED_TUNE)
+		schedtune_root_alloc();
+#endif
 		/* This is early initialization for the top cgroup */
 		return &root_task_group.css;
 	}
@@ -10559,6 +10578,10 @@ cpu_cgroup_css_alloc(struct cgroup_subsys_state *parent_css)
 	tg = sched_create_group(parent);
 	if (IS_ERR(tg))
 		return ERR_PTR(-ENOMEM);
+
+#if IS_ENABLED(CONFIG_OPLUS_SCHED_TUNE)
+	schedtune_alloc(tg, parent_css);
+#endif
 
 	return &tg->css;
 }
@@ -10600,6 +10623,9 @@ static void cpu_cgroup_css_free(struct cgroup_subsys_state *css)
 	 * Relies on the RCU grace period between css_released() and this.
 	 */
 	sched_unregister_group(tg);
+#if IS_ENABLED(CONFIG_OPLUS_SCHED_TUNE)
+	schedtune_free(css);
+#endif
 }
 
 #ifdef CONFIG_RT_GROUP_SCHED
@@ -10621,8 +10647,9 @@ static void cpu_cgroup_attach(struct cgroup_taskset *tset)
 	struct task_struct *task;
 	struct cgroup_subsys_state *css;
 
-	cgroup_taskset_for_each(task, css, tset)
+	cgroup_taskset_for_each(task, css, tset) {
 		sched_move_task(task);
+	}
 
 	trace_android_rvh_cpu_cgroup_attach(tset);
 }
@@ -11272,6 +11299,13 @@ static struct cftype cpu_legacy_files[] = {
 		.write_u64 = cpu_uclamp_ls_write_u64,
 	},
 #endif
+#if IS_ENABLED(CONFIG_OPLUS_SCHED_TUNE)
+	{
+		.name = "schedtune.boost",
+		.read_s64 = schedtune_boost_read,
+		.write_s64 = schedtune_boost_write,
+	},
+#endif
 	{ }	/* Terminate */
 };
 
@@ -11476,6 +11510,13 @@ static struct cftype cpu_files[] = {
 		.write_u64 = cpu_uclamp_ls_write_u64,
 	},
 #endif
+#if IS_ENABLED(CONFIG_OPLUS_SCHED_TUNE)
+	{
+		.name = "schedtune.boost",
+		.read_s64 = schedtune_boost_read,
+		.write_s64 = schedtune_boost_write,
+	},
+#endif
 	{ }	/* terminate */
 };
 
@@ -11494,7 +11535,6 @@ struct cgroup_subsys cpu_cgrp_subsys = {
 	.early_init	= true,
 	.threaded	= true,
 };
-
 #endif	/* CONFIG_CGROUP_SCHED */
 
 void dump_cpu_task(int cpu)
